@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+websockets
+httpx
+pydantic
+pypdf
+python-multipart
+fpdf2

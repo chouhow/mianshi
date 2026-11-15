@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+dist/
+.venv/
+
+# Python 运行时
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 运行时数据（题库/试卷/面试记录/录音/含密钥的配置，均不入库）
+# 题库源数据在 backend/bank_data/，可用 python bank_data/build.py 重建
+data/
+
+# 日志与临时文件
+*.log
+_*.py
+_*.txt
+_*.png
+
+# 导出的报告与示例 PDF（运行产物）
+/*.pdf
+
+# ZCode 工具目录
+.zcode/
