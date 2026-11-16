@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, DIFFICULTIES, FREQ_BADGE, SECTIONS } from '../api.js'
+import { api, DIFFICULTIES, FREQ_BADGE, SECTIONS, downloadFile } from '../api.js'
 import ResumeDropZone from '../components/ResumeDropZone.jsx'
 import { Empty, Modal, navigate } from '../ui.jsx'
 
@@ -224,6 +224,15 @@ export default function PaperDetail({ paperId }) {
         <div className="row">
           <button className="btn secondary" onClick={() => setShowResume(true)}>
             📎 按简历生成新试卷
+          </button>
+          <button
+            className="btn secondary"
+            title="无电脑/麦克风时，打印此表线下手写评分"
+            onClick={() =>
+              downloadFile(`/api/papers/${paper.id}/export_sheet`, `线下评分表_${paper.title}.pdf`)
+                .catch((e) => setError(e.message))}
+          >
+            🖨 线下评分表
           </button>
           <button className="btn success" onClick={() => navigate('/interview/new?paper=' + paper.id)}>
             🎤 开始面试

@@ -40,9 +40,19 @@ npm run dev
 - 后端服务固定运行在 `http://127.0.0.1:18742`
 - 也可只起 Web 调试：`npm run dev:web` 后浏览器打开 `http://localhost:5173`
 
-## 配置密钥（设置页）
+## 配置密钥
 
-首次使用请在 **系统设置** 页配置：
+两种方式，任选其一（设置页显式配置的值优先）：
+
+**方式一：`.env` 文件（推荐，换机/重装不丢配置）**
+
+```bash
+cp .env.example .env   # Windows: copy .env.example .env
+```
+
+在 `.env` 中填入 `ASR_API_KEY`（或旧版 `ASR_APP_ID` + `ASR_ACCESS_TOKEN`）、`ARK_API_KEY`、`ARK_MODEL` 等（文件内有注释说明）。`.env` 已被 gitignore，不会误提交。
+
+**方式二：系统设置页**（保存在 `data/config.json`，留空的字段自动回退读取 `.env`）
 
 | 配置 | 说明 |
 | --- | --- |

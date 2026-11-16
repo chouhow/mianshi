@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, DIFFICULTIES, SECTIONS } from '../api.js'
+import { api, DIFFICULTIES, SECTIONS, downloadFile } from '../api.js'
 import { Empty, Link, Modal, fmtTime, navigate } from '../ui.jsx'
 
 const DEFAULT_PARAMS = {
@@ -225,6 +225,13 @@ export default function Papers() {
                   <td className="right">
                     <button className="btn sm" onClick={() => navigate('/interview/new?paper=' + p.id)}>开始面试</button>{' '}
                     <button className="btn sm secondary" onClick={() => navigate('/papers/' + p.id)}>详情</button>{' '}
+                    <button
+                      className="btn sm secondary"
+                      title="无电脑/麦克风时，打印此表线下手写评分"
+                      onClick={() =>
+                        downloadFile(`/api/papers/${p.id}/export_sheet`, `线下评分表_${p.title}.pdf`)
+                          .catch((e) => setError(e.message))}
+                    >🖨 评分表</button>{' '}
                     <button className="btn sm ghost-danger" onClick={() => remove(p)}>删除</button>
                   </td>
                 </tr>

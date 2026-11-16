@@ -91,7 +91,10 @@ export default function Settings() {
   return (
     <div>
       <h1 className="page-title">系统设置</h1>
-      <p className="page-sub">语音识别（火山引擎）与大模型（火山方舟）凭据保存在本地 data/config.json</p>
+      <p className="page-sub">
+        凭据可写入项目根目录 <code className="inline">.env</code>（模板见 .env.example），此处留空时自动读取；
+        在此页面填写并保存的值优先生效
+      </p>
       {message && <div className={message.startsWith('✅') ? 'alert info' : 'alert error'}>{message}</div>}
 
       <div className="settings-grid">

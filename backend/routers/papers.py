@@ -1,8 +1,10 @@
 """试卷管理 API：随机组卷（频率/难度比例）、查看增删、按简历异步派生新试卷。"""
 import asyncio
 import random
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from models import (GenerateFromResumeRequest, PaperFromResumeRequest, PaperGenerateRequest,
                      PaperUpdateRequest, derive_section)
@@ -199,6 +201,25 @@ def get_paper(paper_id: str):
     if not paper:
         raise HTTPException(404, "试卷不存在")
     return {**paper, "resolved": _resolve_questions(paper)}
+
+
+@router.get("/{paper_id}/export_sheet")
+def export_paper_sheet(paper_id: str):
+    """导出线下评分表 PDF：题目列表 + 空白得分/评语栏（无电脑、无麦克风时面试官手写评分）。"""
+    paper = load_paper(paper_id)
+    if not paper:
+        raise HTTPException(404, "试卷不存在")
+    from services.pdf_report import build_scoring_sheet_pdf
+
+    try:
+        data = build_scoring_sheet_pdf({**paper, "resolved": _resolve_questions(paper)})
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"PDF 生成失败: {e}")
+    filename = f"线下评分表_{paper['title']}_{paper_id}.pdf"
+    headers = {
+        "Content-Disposition": f"attachment; filename=sheet.pdf; filename*=UTF-8''{quote(filename)}"
+    }
+    return Response(content=data, media_type="application/pdf", headers=headers)
 
 
 @router.put("/{paper_id}")

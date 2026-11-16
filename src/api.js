@@ -42,6 +42,27 @@ export function asrWsUrl() {
   return BASE.replace(/^http/, 'ws') + '/ws/asr'
 }
 
+// 下载后端生成的文件（如 PDF 评分表 / 报告）
+export async function downloadFile(path, filename) {
+  let res
+  try {
+    res = await fetch(BASE + path)
+  } catch (e) {
+    throw new Error('无法连接后端服务（' + e.message + '）')
+  }
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json())?.detail || '' } catch { /* 无 body */ }
+    throw new Error(detail || `下载失败（HTTP ${res.status}）`)
+  }
+  const blob = await res.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 // ---------- 领域常量 ----------
 export const SECTIONS = ['基础', '应用', '简历']
 export const DIFFICULTIES = ['简单', '中等', '困难']
