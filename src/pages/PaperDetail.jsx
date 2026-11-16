@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, DIFFICULTIES, FREQ_BADGE, SECTIONS, downloadFile } from '../api.js'
-import ResumeDropZone from '../components/ResumeDropZone.jsx'
 import { Empty, Modal, navigate } from '../ui.jsx'
 
 const SECTION_BADGE = { 基础: 'blue', 应用: 'purple', 简历: 'gray' }
@@ -57,119 +56,10 @@ function AddQuestionModal({ section, onAdd, onClose }) {
   )
 }
 
-// 按简历派生新试卷（异步）：上传简历 → 后台生成 → 完成自动创建新试卷并跳转
-function ResumeFromPaperModal({ paper, onClose, onCreated }) {
-  const [resumeText, setResumeText] = useState('')
-  const [title, setTitle] = useState('')
-  const [taskId, setTaskId] = useState(null)
-  const [taskState, setTaskState] = useState(null) // running/done/error
-  const [error, setError] = useState('')
-
-  // 轮询后台生成任务
-  useEffect(() => {
-    if (!taskId) return undefined
-    const timer = setInterval(async () => {
-      try {
-        const s = await api.get(`/api/papers/tasks/${taskId}`)
-        setTaskState(s.status)
-        if (s.status === 'done') {
-          clearInterval(timer)
-          onCreated({ id: s.paper_id, title: s.title })
-        } else if (s.status === 'error') {
-          clearInterval(timer)
-          setError('生成失败：' + (s.error || '未知错误'))
-        }
-      } catch (e) {
-        clearInterval(timer)
-        setError(e.message)
-      }
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const start = async () => {
-    if (resumeText.trim().length < 10) {
-      setError('请先上传简历 PDF 或粘贴简历文本（至少 10 个字）')
-      return
-    }
-    setError('')
-    try {
-      const d = await api.post(`/api/papers/${paper.id}/generate_from_resume`, {
-        resume_text: resumeText.trim(),
-        title: title.trim() || undefined,
-      })
-      setTaskId(d.task_id)
-      setTaskState('running')
-    } catch (e) {
-      setError(e.message)
-    }
-  }
-
-  const running = taskState === 'running'
-
-  return (
-    <Modal title="按简历生成新试卷" onClose={onClose} width={640}>
-      <div className="col">
-        {running ? (
-          <div className="card center" style={{ marginBottom: 0 }}>
-            <div className="card-title">正在后台生成简历题…</div>
-            <p className="muted">
-              大模型正在根据简历生成个性化题目（含参考答案与评分标准），
-              通常需要 1 分钟左右。完成后会<span style={{ color: '#1d4ed8' }}>自动创建新试卷</span>并跳转。
-            </p>
-            <div className="progress-bar" style={{ width: 300, margin: '10px auto' }}>
-              <div style={{ width: '100%', animation: 'pulse 1.5s infinite' }} />
-            </div>
-            <p className="muted small">可以关闭此窗口，生成完成后新试卷会出现在试卷列表中。</p>
-          </div>
-        ) : (
-          <>
-            <div className="muted">
-              在「{paper.title}」基础上，按候选人简历生成个性化题目，自动另存为一份新试卷（原卷保留）。
-            </div>
-            <ResumeDropZone
-              compact
-              onParsed={(d) => {
-                setResumeText(d.resume_text)
-                if (!title && d.candidate_name) setTitle(`${paper.title}·${d.candidate_name}`)
-                setError('')
-              }}
-            />
-            <div className="field">
-              <label>或直接粘贴简历文本</label>
-              <textarea className="textarea" rows={5} value={resumeText}
-                onChange={(e) => setResumeText(e.target.value)}
-                placeholder="拖入 PDF 会自动填入，也可手动粘贴" />
-            </div>
-            <div className="field">
-              <label>新试卷标题（可选）</label>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)}
-                placeholder={paper.title + '·含简历题'} />
-            </div>
-            <div className="muted small">
-              题量由模型根据简历内容自行决定（3~10 题，每题聚焦一个细节）。
-            </div>
-            {error && <div className="alert error">{error}</div>}
-          </>
-        )}
-      </div>
-      <div className="modal-footer">
-        <button className="btn secondary" onClick={onClose}>{running ? '后台运行，关闭窗口' : '取消'}</button>
-        {!running && (
-          <button className="btn success" onClick={start} disabled={resumeText.trim().length < 10}>
-            📄 生成新试卷（后台自动完成）
-          </button>
-        )}
-      </div>
-    </Modal>
-  )
-}
-
 export default function PaperDetail({ paperId }) {
   const [paper, setPaper] = useState(null)
   const [error, setError] = useState('')
   const [addFor, setAddFor] = useState(null)
-  const [showResume, setShowResume] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -222,9 +112,9 @@ export default function PaperDetail({ paperId }) {
           </p>
         </div>
         <div className="row">
-          <button className="btn secondary" onClick={() => setShowResume(true)}>
-            📎 按简历生成新试卷
-          </button>
+          <span className={'badge ' + (paper.kind === 'resume' ? 'purple' : 'blue')} style={{ alignSelf: 'center' }}>
+            {paper.kind === 'resume' ? '简历卷' : '随机卷'}
+          </span>
           <button
             className="btn secondary"
             title="无电脑/麦克风时，打印此表线下手写评分"
@@ -290,17 +180,6 @@ export default function PaperDetail({ paperId }) {
           </div>
         )
       })}
-
-      {showResume && (
-        <ResumeFromPaperModal
-          paper={paper}
-          onClose={() => setShowResume(false)}
-          onCreated={(p2) => {
-            setShowResume(false)
-            navigate('/papers/' + p2.id)
-          }}
-        />
-      )}
 
       {addFor && (
         <AddQuestionModal

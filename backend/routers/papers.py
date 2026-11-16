@@ -6,7 +6,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from models import (GenerateFromResumeRequest, PaperFromResumeRequest, PaperGenerateRequest,
+from models import (GenerateFromResumeRequest, PaperGenerateRequest,
                      PaperUpdateRequest, derive_section)
 from services import llm
 from storage import delete_paper, list_papers, load_paper, load_questions, new_id, now_iso, save_paper
@@ -134,6 +134,7 @@ def get_papers():
             {
                 "id": p["id"],
                 "title": p["title"],
+                "kind": p.get("kind") or "bank",  # bank=随机卷（题库题） / resume=简历卷
                 "created_at": p.get("created_at"),
                 "question_count": total,
                 "resume_question_count": embedded,  # 内嵌简历题数（按简历生成）
@@ -186,6 +187,7 @@ def generate_paper(payload: PaperGenerateRequest):
     paper = {
         "id": new_id("paper"),
         "title": title,
+        "kind": "bank",  # 随机卷：仅含题库题
         "created_at": now_iso(),
         "params": payload.model_dump(mode="json"),
         "sections": sections,
@@ -193,6 +195,59 @@ def generate_paper(payload: PaperGenerateRequest):
     }
     save_paper(paper)
     return paper
+
+
+def _create_resume_paper(title, questions: list) -> dict:
+    """创建独立简历试卷：仅含按简历生成的内嵌简历题（kind=resume，不基于其他试卷）。"""
+    from storage import new_id as _new_id, now_iso as _now
+
+    embedded = []
+    for q in questions:
+        item = dict(q) if isinstance(q, dict) else q.model_dump()
+        item["category"] = "简历"  # 简历题固定归简历部分
+        embedded.append(item)
+
+    paper = {
+        "id": _new_id("paper"),
+        "title": (title or "").strip() or f"简历卷 {_now()[:16].replace('T', ' ')}",
+        "kind": "resume",
+        "created_at": _now(),
+        "sections": [
+            {"section": "简历", "question_ids": [], "embedded_questions": embedded, "llm_gen_count": 0}
+        ],
+        "warnings": [],
+    }
+    save_paper(paper)
+    return paper
+
+
+async def _run_resume_generation(task_id: str, payload: GenerateFromResumeRequest):
+    """后台任务：LLM 流式按简历生成题目（思考过程与输出实时写入任务状态）→ 创建独立简历试卷。"""
+    task = _GEN_TASKS[task_id]
+
+    def on_chunk(kind: str, text: str):
+        key = "reasoning" if kind == "reasoning" else "output"
+        task[key] = task.get(key, "") + text
+
+    try:
+        questions = await llm.generate_resume_questions(
+            payload.resume_text.strip(), payload.max_count, on_chunk=on_chunk
+        )
+        paper2 = _create_resume_paper(payload.title, questions)
+        task.update({"status": "done", "paper_id": paper2["id"], "title": paper2["title"]})
+    except Exception as e:  # noqa: BLE001
+        task.update({"status": "error", "error": str(e)})
+
+
+@router.post("/generate_from_resume")
+async def generate_paper_from_resume(payload: GenerateFromResumeRequest):
+    """异步生成独立简历试卷：立即返回任务 id，后台流式生成并自动建卷，前端轮询任务状态。"""
+    from storage import new_id as _new_id
+
+    task_id = _new_id("task")
+    _GEN_TASKS[task_id] = {"status": "running"}
+    asyncio.get_event_loop().create_task(_run_resume_generation(task_id, payload))
+    return {"task_id": task_id}
 
 
 @router.get("/{paper_id}")
@@ -261,76 +316,6 @@ def remove_paper(paper_id: str):
         raise HTTPException(404, "试卷不存在")
     delete_paper(paper_id)
     return {"ok": True}
-
-
-def _create_paper_from_questions(paper_id: str, title, questions: list) -> dict:
-    """把简历题以内嵌形式固化进派生的新试卷（原卷保留，简历题不入题库）。"""
-    from storage import new_id as _new_id, now_iso as _now
-
-    paper = load_paper(paper_id)
-    if not paper:
-        raise HTTPException(404, "试卷不存在")
-
-    now = _now()
-    embedded = []
-    for q in questions:
-        item = dict(q) if isinstance(q, dict) else q.model_dump()
-        item["category"] = "简历"  # 简历题固定归简历部分
-        embedded.append(item)
-
-    new_paper = {
-        "id": _new_id("paper"),
-        "title": (title or "").strip() or f"{paper['title']}·含简历题",
-        "created_at": now,
-        "params": paper.get("params"),
-        "sections": [],
-        "warnings": [],
-    }
-    resume_found = False
-    for sec in paper.get("sections", []):
-        new_sec = {**sec, "question_ids": list(sec.get("question_ids", []))}
-        if sec.get("section") == "简历":
-            resume_found = True
-            new_sec["embedded_questions"] = list(sec.get("embedded_questions", [])) + embedded
-            new_sec["llm_gen_count"] = 0
-        new_paper["sections"].append(new_sec)
-    if not resume_found:
-        new_paper["sections"].append(
-            {"section": "简历", "question_ids": [], "embedded_questions": embedded, "llm_gen_count": 0}
-        )
-    save_paper(new_paper)
-    return new_paper
-
-
-@router.post("/{paper_id}/from_resume")
-def paper_from_resume(paper_id: str, payload: PaperFromResumeRequest):
-    """在已有试卷基础上固化简历题，派生一份新试卷（原卷保留）。"""
-    new_paper = _create_paper_from_questions(paper_id, payload.title, payload.questions)
-    return {**new_paper, "resolved": _resolve_questions(new_paper)}
-
-
-async def _run_resume_generation(task_id: str, paper_id: str, payload: GenerateFromResumeRequest):
-    """后台任务：LLM 按简历生成题目 → 自动创建新试卷。"""
-    try:
-        questions = await llm.generate_resume_questions(payload.resume_text.strip(), payload.max_count)
-        paper2 = _create_paper_from_questions(paper_id, payload.title, questions)
-        _GEN_TASKS[task_id] = {"status": "done", "paper_id": paper2["id"], "title": paper2["title"]}
-    except Exception as e:  # noqa: BLE001
-        _GEN_TASKS[task_id] = {"status": "error", "error": str(e)}
-
-
-@router.post("/{paper_id}/generate_from_resume")
-async def generate_paper_from_resume(paper_id: str, payload: GenerateFromResumeRequest):
-    """异步按简历派生新试卷：立即返回任务 id，后台生成并自动建卷，前端轮询任务状态。"""
-    paper = load_paper(paper_id)
-    if not paper:
-        raise HTTPException(404, "试卷不存在")
-    from storage import new_id as _new_id
-
-    task_id = _new_id("task")
-    _GEN_TASKS[task_id] = {"status": "running"}
-    asyncio.get_event_loop().create_task(_run_resume_generation(task_id, paper_id, payload))
-    return {"task_id": task_id}
 
 
 @router.get("/tasks/{task_id}")

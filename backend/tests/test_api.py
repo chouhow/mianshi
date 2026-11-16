@@ -160,37 +160,67 @@ def test_full_interview_flow_with_mock_scoring():
     assert any(x["id"] == iv["id"] and x["status"] == "scored" for x in rows)
 
 
-def test_paper_from_resume_embeds_questions():
-    """按简历派生新试卷：简历题内嵌进试卷，不入题库。"""
+def test_resume_paper_and_multi_paper_interview():
+    """独立简历试卷（仅含简历题）+ 多卷面试合并，报告按 section 汇总。"""
     client = make_client()
+    save_config({"llm_mock": True})
     for i in range(4):
         _mk_question(client, "基础题", i=i)
     paper = client.post("/api/papers/generate", json={
         "sections": [{"section": "基础", "count": 3}],
     }).json()
+    assert paper["kind"] == "bank"
     bank_count = len(client.get("/api/questions").json()["questions"])
 
-    r = client.post(f"/api/papers/{paper['id']}/from_resume", json={
-        "questions": [
-            {"stem": "介绍简历中的项目", "reference_answer": "讲清职责与选型",
-             "scoring_points": "讲清项目：2分", "explanation": "", "category": "简历",
-             "difficulty": "中等", "frequency": "高频"},
-        ],
+    # 独立简历试卷（mock 模式：无需密钥，同步返回 3 题）
+    r = client.post("/api/papers/generate_from_resume", json={
+        "resume_text": "三年 Python 后端经验，熟悉 FastAPI 与 MySQL 优化，做过订单系统",
+        "max_count": 3,
     })
     assert r.status_code == 200, r.text
-    p2 = r.json()
-    resume_sec = [s for s in p2["sections"] if s["section"] == "简历"][0]
-    assert len(resume_sec["embedded_questions"]) == 1
-    assert resume_sec["llm_gen_count"] == 0
-    # 原卷保留；题库没有新增题目
-    assert client.get(f"/api/papers/{paper['id']}").status_code == 200
+    task_id = r.json()["task_id"]
+    deadline = time.time() + 10
+    p2 = None
+    while time.time() < deadline:
+        t = client.get(f"/api/papers/tasks/{task_id}").json()
+        if t["status"] == "done":
+            p2 = client.get("/api/papers/" + t["paper_id"]).json()
+            break
+        if t["status"] == "error":
+            raise AssertionError(t["error"])
+        time.sleep(0.1)
+    assert p2 is not None
+    assert p2["kind"] == "resume"
+    # 仅含简历部分：无题库题、3 道内嵌简历题
+    assert len(p2["sections"]) == 1 and p2["sections"][0]["section"] == "简历"
+    assert p2["sections"][0]["question_ids"] == []
+    assert len(p2["sections"][0]["embedded_questions"]) == 3
+    # 题库没有新增题目
     assert len(client.get("/api/questions").json()["questions"]) == bank_count
     # resolved 合并展示内嵌题
     resolved_resume = [s for s in p2["resolved"]["sections"] if s["section"] == "简历"][0]
-    assert any(q.get("embedded") for q in resolved_resume["questions"])
-    # 创建面试包含内嵌简历题
+    assert all(q.get("embedded") for q in resolved_resume["questions"])
+    # 列表带 kind
+    rows = client.get("/api/papers").json()["papers"]
+    kinds = {row["id"]: row["kind"] for row in rows}
+    assert kinds[paper["id"]] == "bank" and kinds[p2["id"]] == "resume"
+
+    # 多卷面试：随机卷 + 简历卷，题目合并且按 基础→简历 排序
     iv = client.post("/api/interviews", json={
-        "paper_id": p2["id"], "candidate_name": "测试", "resume_text": "", "extra_questions": [],
+        "paper_ids": [paper["id"], p2["id"]],
+        "candidate_name": "测试", "resume_text": "",
     }).json()
+    assert len(iv["items"]) == 3 + 3
+    assert [it["section"] for it in iv["items"]] == ["基础"] * 3 + ["简历"] * 3
+    assert paper["title"] in iv["paper_title"] and p2["title"] in iv["paper_title"]
     assert any(it["source"] == "resume" for it in iv["items"])
-    assert len(iv["items"]) == 3 + 1
+
+    # 单卷兼容写法（paper_id）仍可用
+    iv2 = client.post("/api/interviews", json={
+        "paper_id": paper["id"], "candidate_name": "兼容", "resume_text": "",
+    }).json()
+    assert len(iv2["items"]) == 3
+
+    # 未选试卷报 422
+    r = client.post("/api/interviews", json={"candidate_name": "无卷", "resume_text": ""})
+    assert r.status_code == 422

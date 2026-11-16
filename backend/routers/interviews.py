@@ -43,34 +43,43 @@ def _make_item(question: dict, order: int, source: str, section: str | None = No
 
 @router.post("")
 def create_interview(payload: CreateInterviewRequest):
-    paper = load_paper(payload.paper_id)
-    if not paper:
-        raise HTTPException(404, "试卷不存在")
+    paper_ids = payload.effective_paper_ids()
+    if not paper_ids:
+        raise HTTPException(422, "请至少选择一份试卷")
+    papers = []
+    for pid in paper_ids:
+        paper = load_paper(pid)
+        if not paper:
+            raise HTTPException(404, f"试卷不存在：{pid}")
+        papers.append(paper)
     bank = {q["id"]: q for q in load_questions()}
 
-    items = []
-    order = 0
-    for sec in sorted(paper.get("sections", []), key=lambda s: SECTION_ORDER.get(s["section"], 9)):
-        for qid in sec.get("question_ids", []):
-            if qid not in bank:
-                continue
-            items.append(_make_item(bank[qid], order, "bank", section=sec["section"]))
-            order += 1
-        # 试卷内嵌的简历题（派生试卷时固化，不依赖题库）
-        for emb in sec.get("embedded_questions", []):
-            items.append(_make_item(emb, order, "resume"))
-            order += 1
+    # 合并多卷题目（如随机卷 + 简历卷），按 基础→应用→简历 稳定排序（保留卷内顺序）
+    collected = []
+    for paper in papers:
+        for sec in sorted(paper.get("sections", []), key=lambda s: SECTION_ORDER.get(s["section"], 9)):
+            for qid in sec.get("question_ids", []):
+                if qid in bank:
+                    collected.append((sec["section"], bank[qid], "bank"))
+            # 试卷内嵌的简历题（简历卷生成时固化，不依赖题库）
+            for emb in sec.get("embedded_questions", []):
+                collected.append(("简历", emb, "resume"))
     for extra in payload.extra_questions:
-        items.append(_make_item(extra.model_dump(), order, "llm"))
-        order += 1
+        collected.append(("简历", extra.model_dump(), "llm"))
+    collected.sort(key=lambda row: SECTION_ORDER.get(row[0], 9))
+
+    items = []
+    for order, (section, q, source) in enumerate(collected):
+        items.append(_make_item(q, order, source, section=section))
 
     if not items:
-        raise HTTPException(400, "试卷中没有可用题目（题目可能已被删除），无法开始面试")
+        raise HTTPException(400, "所选试卷中没有可用题目（题目可能已被删除），无法开始面试")
 
     interview = {
         "id": new_id("iv"),
-        "paper_id": paper["id"],
-        "paper_title": paper["title"],
+        "paper_id": papers[0]["id"],
+        "paper_ids": [p["id"] for p in papers],
+        "paper_title": " + ".join(p["title"] for p in papers),
         "candidate_name": payload.candidate_name.strip(),
         "resume_text": (payload.resume_text or "").strip(),
         "status": "ongoing",

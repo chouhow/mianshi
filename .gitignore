@@ -23,6 +23,7 @@ _*.png
 
 # 导出的报告与示例 PDF（运行产物）
 /*.pdf
+output/
 
 # ZCode 工具目录
 .zcode/

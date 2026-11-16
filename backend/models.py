@@ -95,14 +95,8 @@ class PaperUpdateRequest(BaseModel):
     llm_gen_count: Optional[int] = None
 
 
-class PaperFromResumeRequest(BaseModel):
-    """基于已生成试卷 + 简历题派生新试卷。"""
-    title: Optional[str] = None
-    questions: List[QuestionIn] = Field(min_length=1)
-
-
 class GenerateFromResumeRequest(BaseModel):
-    """异步按简历生成新试卷：上传简历文本与题数，后台生成题目并创建新试卷。"""
+    """异步按简历生成独立简历试卷（仅含简历题，不基于其他试卷）。"""
     resume_text: str = Field(min_length=10)
     max_count: int = Field(default=10, ge=3, le=10)  # 题量上限，模型在 3~上限间自行决定
     title: Optional[str] = None
@@ -111,11 +105,19 @@ class GenerateFromResumeRequest(BaseModel):
 # ---------- 面试 ----------
 
 class CreateInterviewRequest(BaseModel):
-    paper_id: str
+    # 多卷面试：随机卷 + 简历卷等可同时勾选；paper_id 为单卷兼容写法
+    paper_ids: List[str] = []
+    paper_id: Optional[str] = None
     candidate_name: str = Field(min_length=1)
     resume_text: Optional[str] = ""
     # 简历部分的 LLM 生成题（前端可预览编辑后传入）
     extra_questions: List[QuestionIn] = []
+
+    def effective_paper_ids(self) -> list:
+        ids = [p for p in (self.paper_ids or []) if p]
+        if not ids and self.paper_id:
+            ids = [self.paper_id]
+        return ids
 
     @field_validator("candidate_name")
     @classmethod

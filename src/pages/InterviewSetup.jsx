@@ -1,89 +1,117 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api.js'
 import ResumeDropZone from '../components/ResumeDropZone.jsx'
 import { navigate } from '../ui.jsx'
 
+const KIND_TEXT = { bank: '随机卷', resume: '简历卷' }
+
 export default function InterviewSetup({ paperId }) {
-  const [paper, setPaper] = useState(null)
+  const [papers, setPapers] = useState(null)
+  const [selected, setSelected] = useState(paperId ? [paperId] : [])
   const [candidateName, setCandidateName] = useState('')
   const [resumeText, setResumeText] = useState('')
-  const [genCount, setGenCount] = useState(null) // null=未读试卷
-  const [generated, setGenerated] = useState([]) // LLM 生成的简历题（可编辑）
-  const [parsedName, setParsedName] = useState('') // PDF 解析识别出的姓名
-  const [busy, setBusy] = useState('') // loading | generating | creating
+  const [parsedName, setParsedName] = useState('')
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    api.get('/api/papers/' + paperId)
-      .then((p) => {
-        setPaper(p)
-        const resumeSec = p.sections.find((s) => s.section === '简历')
-        setGenCount(resumeSec?.llm_gen_count || 0)
-      })
+    api.get('/api/papers')
+      .then((d) => setPapers(d.papers))
       .catch((e) => setError(e.message))
-  }, [paperId])
+  }, [])
 
-  if (error) return <div className="alert error">{error}</div>
-  if (!paper) return <div className="empty">加载中…</div>
+  const toggle = (id) =>
+    setSelected(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
 
-  const generate = async () => {
-    if (resumeText.trim().length < 10) {
-      setError('请先粘贴候选人简历（至少 10 个字）')
-      return
-    }
-    setBusy('generating')
-    setError('')
-    try {
-      const data = await api.post('/api/llm/generate_resume_questions', {
-        resume_text: resumeText.trim(),
-        max_count: 10,
-      })
-      if (data.error) throw new Error(data.error)
-      setGenerated(data.questions)
-    } catch (e) {
-      setError('生成简历题失败：' + e.message)
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const updateGen = (i, patch) => {
-    setGenerated(generated.map((q, idx) => (idx === i ? { ...q, ...patch } : q)))
-  }
+  // 合计题数（题库题 + 内嵌简历题）
+  const totalQuestions = (papers || [])
+    .filter((p) => selected.includes(p.id))
+    .reduce((n, p) => n + (p.question_count || 0) + (p.resume_question_count || 0), 0)
 
   const start = async () => {
     if (!candidateName.trim()) {
       setError('请填写候选人姓名')
       return
     }
-    if (genCount > 0 && generated.length === 0 && resumeText.trim().length >= 10) {
-      if (!window.confirm('还没有生成简历题，确定直接开始面试吗？')) return
+    if (selected.length === 0) {
+      setError('请至少勾选一份试卷（随机卷 + 简历卷可同时勾选）')
+      return
     }
-    setBusy('creating')
+    setBusy(true)
     setError('')
     try {
       const iv = await api.post('/api/interviews', {
-        paper_id: paper.id,
+        paper_ids: selected,
         candidate_name: candidateName.trim(),
         resume_text: resumeText.trim(),
-        extra_questions: generated.map((q) => ({
-          ...q,
-          category: q.category || '简历',
-        })),
       })
       navigate('/interview/run/' + iv.id)
     } catch (e) {
       setError(e.message)
     } finally {
-      setBusy('')
+      setBusy(false)
     }
   }
+
+  const group = (kind) => (papers || []).filter((p) => (p.kind || 'bank') === kind)
+
+  const renderRow = (p) => (
+    <label key={p.id} className="paper-check">
+      <input
+        type="checkbox"
+        checked={selected.includes(p.id)}
+        onChange={() => toggle(p.id)}
+      />
+      <span className="grow">
+        <b>{p.title}</b>
+        <span className="muted small" style={{ marginLeft: 8 }}>
+          {p.question_count || 0} 道题库题
+          {p.resume_question_count > 0 && ` + ${p.resume_question_count} 道简历题`}
+        </span>
+      </span>
+    </label>
+  )
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
       <h1 className="page-title">开始面试</h1>
-      <p className="page-sub">试卷：{paper.title} · 题库题 {paper.sections.reduce((n, s) => n + s.question_ids.length, 0)} 道</p>
+      <p className="page-sub">
+        勾选本次面试使用的试卷（随机卷 + 简历卷可组合），结束后报告按 基础 / 应用 / 简历 自动汇总
+      </p>
       {error && <div className="alert error">{error}</div>}
+
+      <div className="card">
+        <div className="card-title">选择试卷（可多选）</div>
+        {papers === null ? (
+          <div className="empty">加载中…</div>
+        ) : (
+          <div className="col">
+            {group('bank').length > 0 && (
+              <>
+                <div className="muted small">🎲 随机卷（基础 + 应用，题库抽题）</div>
+                {group('bank').map(renderRow)}
+              </>
+            )}
+            {group('resume').length > 0 && (
+              <>
+                <div className="muted small" style={{ marginTop: 10 }}>📄 简历卷（按候选人简历生成）</div>
+                {group('resume').map(renderRow)}
+              </>
+            )}
+            {papers.length === 0 && (
+              <div className="empty">
+                还没有试卷，先到「试卷管理」随机组卷或按简历生成
+                <div style={{ marginTop: 8 }}>
+                  <button className="btn sm secondary" onClick={() => navigate('/papers')}>前往试卷管理</button>
+                </div>
+              </div>
+            )}
+            {selected.length > 0 && (
+              <div className="muted mt">已选 {selected.length} 份卷 · 合计 {totalQuestions} 道题</div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="card">
         <div className="card-title">候选人简历（PDF）</div>
@@ -113,74 +141,17 @@ export default function InterviewSetup({ paperId }) {
             onChange={(e) => setCandidateName(e.target.value)} placeholder="如：李四" />
         </div>
         <div className="field">
-          <label>候选人简历（PDF 解析后自动填入，也可直接粘贴文本）</label>
+          <label>候选人简历（用于简历熟悉度评价；PDF 解析后自动填入，也可直接粘贴文本）</label>
           <textarea className="textarea" rows={8} value={resumeText}
             onChange={(e) => setResumeText(e.target.value)}
             placeholder={'粘贴简历全文或要点，例如：\nxx大学 计算机专业\nA公司 Python后端 2年：负责订单系统，FastAPI + MySQL，做过慢查询优化…'} />
         </div>
       </div>
 
-      {genCount > 0 && (
-        <div className="card">
-          <div className="row between mb">
-            <div>
-              <div className="card-title" style={{ marginBottom: 4 }}>简历个性化题目</div>
-              <div className="muted">由大模型根据简历内容自行决定题量（3~10 题，每题聚焦一个细节）</div>
-            </div>
-            <button className="btn" onClick={generate} disabled={busy === 'generating'}>
-              {busy === 'generating' ? '生成中…' : '✨ 根据简历生成题目'}
-            </button>
-          </div>
-          {generated.length === 0 ? (
-            <div className="empty">尚未生成。粘贴简历后点击上方按钮。</div>
-          ) : (
-            <div className="col">
-              {generated.map((q, i) => (
-                <div className="card" key={i} style={{ marginBottom: 0, background: '#f8fafc' }}>
-                  <div className="field mb">
-                    <label>题干</label>
-                    <textarea className="textarea" rows={2} value={q.stem}
-                      onChange={(e) => updateGen(i, { stem: e.target.value })} />
-                  </div>
-                  <div className="field mb">
-                    <label>参考答案</label>
-                    <textarea className="textarea" rows={2} value={q.reference_answer}
-                      onChange={(e) => updateGen(i, { reference_answer: e.target.value })} />
-                  </div>
-                  <div className="field mb">
-                    <label>评分标准（每行一个采分点及分值，合计 5 分）</label>
-                    <textarea className="textarea" rows={2} value={q.scoring_points || ''}
-                      onChange={(e) => updateGen(i, { scoring_points: e.target.value })} />
-                  </div>
-                  <div className="row">
-                    <div className="field grow">
-                      <label>讲解（可选）</label>
-                      <input className="input" value={q.explanation || ''}
-                        onChange={(e) => updateGen(i, { explanation: e.target.value })} />
-                    </div>
-                    <div className="field">
-                      <label>难度</label>
-                      <select className="select" value={q.difficulty || '中等'}
-                        onChange={(e) => updateGen(i, { difficulty: e.target.value })}>
-                        <option>简单</option><option>中等</option><option>困难</option>
-                      </select>
-                    </div>
-                    <button className="btn sm ghost-danger" style={{ alignSelf: 'flex-end' }}
-                      onClick={() => setGenerated(generated.filter((_, idx) => idx !== i))}>
-                      移除
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="row">
         <button className="btn secondary" onClick={() => navigate('/papers')}>返回</button>
-        <button className="btn success" onClick={start} disabled={busy === 'creating'}>
-          {busy === 'creating' ? '创建中…' : '🎤 进入面试'}
+        <button className="btn success" onClick={start} disabled={busy || selected.length === 0}>
+          {busy ? '创建中…' : '🎤 进入面试'}
         </button>
       </div>
     </div>

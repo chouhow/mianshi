@@ -191,6 +191,25 @@ textarea.textarea { width: 100%; resize: vertical; line-height: 1.6; }
 .live-box .placeholder { color: #64748b; }
 .rec-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); animation: pulse 1.2s infinite; margin-right: 6px; }
 
+/* ---------- LLM 流式输出（思考过程 / 生成内容） ---------- */
+.llm-live { margin-top: 6px; }
+.llm-block { margin-bottom: 10px; text-align: left; }
+.llm-reasoning, .llm-output {
+  white-space: pre-wrap; word-break: break-word; margin: 0; text-align: left;
+  max-height: 170px; overflow-y: auto; font-size: 12px; line-height: 1.65;
+  border-radius: 8px; padding: 10px 12px;
+}
+.llm-reasoning { background: #f1f5f9; border: 1px dashed var(--border); color: var(--text-2); font-family: inherit; }
+.llm-output { background: #0f172a; color: #e2e8f0; font-family: Consolas, 'Courier New', monospace; }
+
+/* ---------- 面试设置：试卷多选 ---------- */
+.paper-check {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px;
+  background: #fff;
+}
+.paper-check:hover { border-color: var(--primary); }
+
 /* ---------- 报告页 ---------- */
 .score-hero { display: flex; gap: 14px; flex-wrap: wrap; }
 .score-card {

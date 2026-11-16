@@ -47,6 +47,61 @@ async def chat(messages: list, temperature: Optional[float] = None, timeout: flo
     raise LLMError(f"方舟调用失败：{last_err}")
 
 
+async def chat_stream(messages: list, temperature: Optional[float] = None, timeout: float = 300.0):
+    """流式调用方舟 chat completions，逐块 yield (kind, text)；kind 为 "reasoning"（思考过程）或 "content"（正式输出）。"""
+    cfg = get_config()["ark"]
+    if not cfg.get("api_key") or not cfg.get("model"):
+        raise LLMError("未配置方舟 API Key 或模型 ID，请在设置页填写")
+    url = cfg["base_url"].rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {cfg['api_key']}"}
+    body = {
+        "model": cfg["model"],
+        "messages": messages,
+        "temperature": cfg.get("temperature", 0.1) if temperature is None else temperature,
+        "stream": True,
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", url, headers=headers, json=body) as resp:
+            if resp.status_code != 200:
+                raw = (await resp.aread()).decode("utf-8", "ignore")
+                try:
+                    detail = json.loads(raw).get("error", {}).get("message", raw[:300])
+                except Exception:  # noqa: BLE001
+                    detail = raw[:300]
+                raise LLMError(f"方舟调用失败：HTTP {resp.status_code}: {detail}")
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if not chunk:
+                    continue
+                if chunk == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(chunk)
+                except json.JSONDecodeError:
+                    continue
+                choices = obj.get("choices") or []
+                delta = (choices[0].get("delta") if choices else None) or {}
+                # 推理模型的思考过程在 reasoning_content（方舟）/ reasoning（OpenAI 风格）
+                reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                if reasoning:
+                    yield "reasoning", reasoning
+                if delta.get("content"):
+                    yield "content", delta["content"]
+
+
+async def chat_stream_collect(messages: list, on_chunk=None, **kwargs) -> str:
+    """流式调用并收集完整输出；on_chunk(kind, text) 用于实时回调（如写入任务状态）。"""
+    parts: list[str] = []
+    async for kind, text in chat_stream(messages, **kwargs):
+        if on_chunk:
+            on_chunk(kind, text)
+        if kind == "content":
+            parts.append(text)
+    return "".join(parts)
+
+
 def extract_json(text: str):
     """从模型输出中鲁棒地提取 JSON（容忍代码围栏与前后说明文字）。"""
     if not text:
@@ -229,8 +284,11 @@ explanation 字段是写给面试官看的题目说明（面试官未必熟悉�
 只输出 JSON，格式：{"questions": [{"stem": "题干", "reference_answer": "参考答案要点", "scoring_points": "评分标准，每行一个采分点及分值，合计5分，如：答出项目背景与职责：2分", "explanation": "为什么问：…；期望回答：…；警惕信号：…", "difficulty": "简单|中等|困难"}]}"""
 
 
-async def generate_resume_questions(resume_text: str, max_count: int = 10) -> list:
-    """根据简历生成个性化面试题：题量 3~max_count 由模型按简历丰富程度自行决定。"""
+async def generate_resume_questions(resume_text: str, max_count: int = 10, on_chunk=None) -> list:
+    """根据简历生成个性化面试题：题量 3~max_count 由模型按简历丰富程度自行决定。
+
+    on_chunk(kind, text)：提供时改用流式调用，逐块回调思考过程与输出文本（kind 为 "reasoning"/"content"）。
+    """
     if is_mock():
         return [
             {
@@ -240,14 +298,18 @@ async def generate_resume_questions(resume_text: str, max_count: int = 10) -> li
                 "difficulty": "中等",
                 "scoring_mode": "holistic",
             }
-            for i in range(count)
+            for i in range(max_count)
         ]
     system = GEN_RESUME_SYSTEM.replace("{max_count}", str(max_count))
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": f"【候选人简历】\n{resume_text}\n\n请按上述要求生成面试题。"},
     ]
-    data = await chat_json(messages)
+    if on_chunk:
+        text = await chat_stream_collect(messages, on_chunk)
+        data = extract_json(text)
+    else:
+        data = await chat_json(messages)
     questions = data.get("questions", []) if isinstance(data, dict) else data
     out = []
     for q in questions:
