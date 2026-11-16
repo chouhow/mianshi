@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, FREQ_BADGE, SECTIONS, STATE_BADGE, STATE_TEXT } from '../api.js'
-import { navigate } from '../ui.jsx'
+import { navigate, Markdown } from '../ui.jsx'
 import { MicRecorder } from '../audio.js'
 
 const DIFF_BADGE = { 简单: 'green', 中等: 'orange', 困难: 'red' }
@@ -218,15 +218,15 @@ export default function InterviewRun({ interviewId }) {
                 {active.scoring_points && (
                   <>
                     <div className="muted mb"><b>评分标准（采分点）</b></div>
-                    <pre className="wrap">{active.scoring_points}</pre>
+                    <Markdown text={active.scoring_points} />
                   </>
                 )}
                 <div className="muted mb mt"><b>参考答案</b></div>
-                <pre className="wrap">{active.reference_answer}</pre>
+                <Markdown text={active.reference_answer} />
                 {active.explanation && (
                   <>
                     <div className="muted mt mb"><b>题目讲解</b></div>
-                    <pre className="wrap">{active.explanation}</pre>
+                    <Markdown text={active.explanation} />
                   </>
                 )}
               </div>

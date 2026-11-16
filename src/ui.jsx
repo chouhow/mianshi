@@ -1,5 +1,8 @@
 // 极简 hash 路由 + 通用小组件
 import { useEffect, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
 
 export function parseRoute() {
   const raw = (window.location.hash || '#/questions').replace(/^#/, '')
@@ -64,4 +67,14 @@ export function Empty({ text = '暂无数据' }) {
 export function fmtTime(iso) {
   if (!iso) return '-'
   return iso.replace('T', ' ')
+}
+
+// Markdown 富文本渲染：题目讲解 / 参考答案 / LLM 评语等
+// remark-breaks 让单个换行也换行（兼容纯文本多行内容），GFM 支持表格、删除线、任务列表
+export function Markdown({ text }) {
+  return (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{text || ''}</ReactMarkdown>
+    </div>
+  )
 }

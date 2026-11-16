@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, API_BASE, STATE_BADGE, STATE_TEXT } from '../api.js'
-import { Link, fmtTime } from '../ui.jsx'
+import { Link, Markdown, fmtTime } from '../ui.jsx'
 
 const SECTION_BADGE = { 基础: 'blue', 应用: 'purple', 简历: 'gray' }
 
@@ -230,13 +230,13 @@ export default function InterviewReport({ interviewId }) {
       {interview.resume_comment && (
         <div className="card">
           <div className="card-title">简历熟悉度评价（{interview.scores.resume_familiar} / 15）</div>
-          <pre className="wrap">{interview.resume_comment}</pre>
+          <Markdown text={interview.resume_comment} />
         </div>
       )}
 
       <div className="card">
         <div className="card-title">整体评价</div>
-        <pre className="wrap">{interview.overall_comment || '（未生成，可重新评分补全）'}</pre>
+        <Markdown text={interview.overall_comment || '（未生成，可重新评分补全）'} />
       </div>
     </div>
   )

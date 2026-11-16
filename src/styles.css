@@ -153,6 +153,36 @@ textarea.textarea { width: 100%; resize: vertical; line-height: 1.6; }
 
 .stem-big { font-size: 17px; font-weight: 600; line-height: 1.6; }
 .ref-answer { background: #f8fafc; border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; }
+
+/* ---------- Markdown 富文本 ---------- */
+.md { font-size: 13.5px; line-height: 1.75; word-break: break-word; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 6px 0; white-space: pre-wrap; }
+.md h1, .md h2, .md h3, .md h4 { margin: 14px 0 6px; line-height: 1.4; }
+.md h1 { font-size: 16px; } .md h2 { font-size: 15px; } .md h3 { font-size: 14px; } .md h4 { font-size: 13.5px; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md li::marker { color: var(--text-2); }
+.md code {
+  font-family: Consolas, 'Courier New', monospace; font-size: 12.5px;
+  background: #eef2f7; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+}
+.md pre {
+  background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px 12px;
+  overflow-x: auto; margin: 8px 0; line-height: 1.6;
+}
+.md pre code { background: none; border: none; padding: 0; color: inherit; font-size: 12.5px; }
+.md blockquote {
+  margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--primary);
+  background: #f8fafc; border-radius: 0 6px 6px 0; color: var(--text-2);
+}
+.md table { border-collapse: collapse; margin: 8px 0; font-size: 13px; display: block; max-width: 100%; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+.md th { background: #f8fafc; font-weight: 600; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.md a { color: var(--primary); }
+.md img { max-width: 100%; border-radius: 6px; }
 .live-box {
   background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 12px 14px;
   min-height: 88px; max-height: 200px; overflow-y: auto; font-size: 14px; line-height: 1.8;

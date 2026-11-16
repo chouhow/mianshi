@@ -23,8 +23,14 @@ from extend_freq import FREQUENCY_EXT  # noqa: E402
 from extend_exp import EXPLANATIONS_EXT  # noqa: E402
 from extend_simple import SIMPLE_MORE  # noqa: E402
 from extend_simple2 import SIMPLE_MORE2  # noqa: E402
+from explain_python import PYTHON_EXPLAIN  # noqa: E402
+from explain_db import DB_EXPLAIN  # noqa: E402
+from explain_ai import AI_EXPLAIN  # noqa: E402
 
 EXPLANATIONS = {**EXPLANATIONS, **EXPLANATIONS2, **EXPLANATIONS3, **EXPLANATIONS_EXT}
+
+# 完整版讲解（键=完整题干，精确匹配）：优先级最高
+EXPLAIN_ALL = {**PYTHON_EXPLAIN, **DB_EXPLAIN, **AI_EXPLAIN}
 
 
 # 难度重标定：原标注偏难的"简单"题升为中等，偏简单的"中等"题降为简单
@@ -70,7 +76,9 @@ from storage import DATA_DIR, load_questions, new_id, now_iso, save_questions  #
 
 
 def _explanation_for(stem: str, default: str) -> str:
-    """优先用补充讲解（按题干前缀匹配），否则用数据文件自带讲解。"""
+    """优先用完整版讲解（题干精确匹配），其次补充讲解（前缀匹配），否则用数据文件自带讲解。"""
+    if stem in EXPLAIN_ALL:
+        return EXPLAIN_ALL[stem]
     for prefix, text in EXPLANATIONS.items():
         if stem.startswith(prefix):
             return text
@@ -121,10 +129,13 @@ def main():
 
     now = now_iso()
     questions = []
+    n_full = 0  # 命中完整版讲解（explain_*.py 精确匹配）的题数
     for stem, answer, scoring, explanation, category, difficulty, _section in all_questions:
         for prefix, new_diff in REGRADE.items():
             if stem.startswith(prefix):
                 difficulty = new_diff
+        if stem in EXPLAIN_ALL:
+            n_full += 1
         questions.append({
             "id": new_id("q"),
             "stem": stem,
@@ -141,6 +152,8 @@ def main():
     n_exp = sum(1 for q in questions if q["explanation"])
     n_hard_exp = sum(1 for q in questions if q["difficulty"] == "困难" and q["explanation"])
     print(f"已写入新题库 {len(questions)} 道（旧库已清空）")
+    print(f"完整版讲解命中: {n_full}/{len(questions)}"
+          + ("" if n_full == len(questions) else f"（未命中题干见 explain_*.py 键）"))
     n_hard_total = sum(1 for q in questions if q["difficulty"] == "困难")
     print(f"含讲解: {n_exp}/{len(questions)}（其中困难题 {n_hard_exp}/{n_hard_total}）")
 

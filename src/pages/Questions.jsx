@@ -74,8 +74,8 @@ function QuestionFormModal({ initial, categories, onSave, onClose }) {
           <textarea className="textarea" rows={3} value={form.scoring_points} onChange={set('scoring_points')} placeholder={'每行一个采分点及分值，合计 5 分。例如：\n答出列表可变、元组不可变：2分\n答出元组可哈希、可作字典键：1.5分\n答出元组内存更小：1.5分\n\n留空时 LLM 会按参考答案自动归纳采分点'} />
         </div>
         <div className="field">
-          <label>题目讲解（可选）</label>
-          <textarea className="textarea" rows={2} value={form.explanation} onChange={set('explanation')} placeholder="出题意图、追问方向等，供面试官参考" />
+          <label>题目讲解（可选，支持 Markdown：列表 / 代码 / 表格）</label>
+          <textarea className="textarea" rows={2} value={form.explanation} onChange={set('explanation')} placeholder="出题意图、追问方向等，供面试官参考。支持 Markdown，如：&#10;- 要点一&#10;- \`code\` 示例" />
         </div>
         <div className="form-grid">
           <div className="field">
