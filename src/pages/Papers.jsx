@@ -233,7 +233,7 @@ function ResumePaperModal({ onClose, onCreated }) {
           <div className="card center" style={{ marginBottom: 0 }}>
             <div className="card-title">正在生成简历试卷…</div>
             <p className="muted">
-              大模型正在根据简历生成个性化题目（含参考答案与评分标准），
+              大模型正在根据简历生成个性化题目（含参考答案），
               通常需要 1 分钟左右。完成后会<span style={{ color: '#1d4ed8' }}>自动创建简历试卷</span>并跳转。
             </p>
             <div className="progress-bar" style={{ width: 300, margin: '10px auto' }}>
@@ -261,7 +261,7 @@ function ResumePaperModal({ onClose, onCreated }) {
           <>
             <div className="muted">
               生成一份<span style={{ color: '#1d4ed8' }}>仅含简历题</span>的独立试卷；面试时可与随机卷同时勾选，
-              报告自动按 基础/应用/简历 汇总。
+              从简历提到的技术中随机抽取最多 6 道题库题（不足 6 道按实际数量），再加入 AI 生成的项目题。两类题在报告中均显示为「简历」。
             </div>
             <ResumeDropZone
               compact
@@ -284,7 +284,7 @@ function ResumePaperModal({ onClose, onCreated }) {
                   placeholder="简历卷·张三" />
               </div>
               <div className="field">
-                <label>题量上限</label>
+                <label>AI 生成题量上限</label>
                 <select className="select" value={maxCount} onChange={(e) => setMaxCount(e.target.value)}>
                   {[3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} 题</option>)}
                 </select>
@@ -312,24 +312,48 @@ function ResumePaperModal({ onClose, onCreated }) {
 export default function Papers() {
   const [papers, setPapers] = useState(null)
   const [categories, setCategories] = useState([])
+  const [manualTitle, setManualTitle] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const createManual = async () => {
+    setCreating(true)
+    try {
+      const paper = await api.post('/api/papers', { title: manualTitle.trim() })
+      navigate('/questions?paper=' + paper.id)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setCreating(false)
+    }
+  }
   const [showGen, setShowGen] = useState(false)
   const [showResume, setShowResume] = useState(false)
   const [error, setError] = useState('')
 
+  const [loadError, setLoadError] = useState('')
   const load = useCallback(async () => {
     try {
       const data = await api.get('/api/papers')
       setPapers(data.papers)
+      setLoadError('')
       setError('')
+      api.get('/api/questions/categories').then((d) => setCategories(d.categories.filter(c => c !== '算法笔试'))).catch(() => {})
     } catch (e) {
-      setError(e.message)
+      setLoadError(e.message)
     }
   }, [])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    api.get('/api/questions/categories').then((d) => setCategories(d.categories)).catch(() => {})
-  }, [])
+    if (!loadError) return
+    let active = true
+    let timer
+    const retry = async () => {
+      await load()
+      if (active) timer = setTimeout(retry, 3000)
+    }
+    timer = setTimeout(retry, 3000)
+    return () => { active = false; clearTimeout(timer) }
+  }, [loadError, load])
 
   const remove = async (p) => {
     if (!window.confirm(`确定删除试卷「${p.title}」？`)) return
@@ -342,21 +366,23 @@ export default function Papers() {
       <div className="row between">
         <div>
           <h1 className="page-title">试卷管理</h1>
-          <p className="page-sub">随机卷（题库抽题）与简历卷（按简历生成）独立管理，面试时可多卷同选</p>
+          <p className="page-sub">可手动选题、随机抽题或按简历生成试卷，面试时可组合使用</p>
         </div>
         <div className="row">
+          <button className="btn" onClick={() => { setManualTitle(''); setError('') }}>＋ 创建空白试卷</button>
           <button className="btn" onClick={() => setShowGen(true)}>🎲 随机组卷</button>
           <button className="btn" onClick={() => setShowResume(true)}>📄 简历生成试卷</button>
         </div>
       </div>
 
+      {loadError && <div className="alert error">{loadError}。正在自动重试。</div>}
       {error && <div className="alert error">{error}</div>}
 
       <div className="card" style={{ padding: 0 }}>
         {papers === null ? (
-          <Empty text="加载中…" />
+          <Empty text={loadError ? "等待试卷服务恢复…" : "加载中…"} />
         ) : papers.length === 0 ? (
-          <Empty text="还没有试卷，点击右上角「随机组卷」或「简历生成试卷」创建" />
+          <Empty text="还没有试卷，可先创建空白试卷，再从题库选题" />
         ) : (
           <table className="table">
             <thead>
@@ -370,7 +396,7 @@ export default function Papers() {
                   <td><Link to={'/papers/' + p.id}><b>{p.title}</b></Link></td>
                   <td>
                     <span className={'badge ' + (p.kind === 'resume' ? 'purple' : 'blue')}>
-                      {p.kind === 'resume' ? '简历卷' : '随机卷'}
+                      {p.kind === 'manual' ? '自建卷' : p.kind === 'resume' ? '简历卷' : '随机卷'}
                     </span>
                   </td>
                   <td>{p.question_count}</td>
@@ -381,11 +407,11 @@ export default function Papers() {
                     <button className="btn sm secondary" onClick={() => navigate('/papers/' + p.id)}>详情</button>{' '}
                     <button
                       className="btn sm secondary"
-                      title="无电脑/麦克风时，打印此表线下手写评分"
+                      title="无电脑/麦克风时，打印此表线下记录回答"
                       onClick={() =>
-                        downloadFile(`/api/papers/${p.id}/export_sheet`, `线下评分表_${p.title}.pdf`)
+                        downloadFile(`/api/papers/${p.id}/export_sheet`, `线下面试记录表_${p.title}.pdf`)
                           .catch((e) => setError(e.message))}
-                    >🖨 评分表</button>{' '}
+                    >🖨 面试记录表</button>{' '}
                     <button className="btn sm ghost-danger" onClick={() => remove(p)}>删除</button>
                   </td>
                 </tr>
@@ -395,6 +421,18 @@ export default function Papers() {
         )}
       </div>
 
+      {manualTitle !== null && (
+        <Modal title="创建空白试卷" onClose={() => setManualTitle(null)}>
+          <div className="field"><label htmlFor="manual-title">试卷名称</label>
+            <input id="manual-title" className="input" autoFocus value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} />
+          </div>
+          {error && <div className="alert error">{error}</div>}
+          <div className="modal-footer">
+            <button className="btn secondary" onClick={() => setManualTitle(null)}>取消</button>
+            <button className="btn" disabled={creating || !manualTitle.trim()} onClick={createManual}>创建并前往题库</button>
+          </div>
+        </Modal>
+      )}
       {showGen && (
         <GenerateModal
           categories={categories}

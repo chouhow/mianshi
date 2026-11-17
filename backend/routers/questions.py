@@ -9,12 +9,14 @@ router = APIRouter(prefix="/api/questions", tags=["questions"])
 
 @router.get("")
 def list_questions(category: str = "", difficulty: str = "", section: str = "",
-                   frequency: str = "", q: str = ""):
+                   frequency: str = "", q: str = "", favorite: bool = False):
     """section 参数按派生规则过滤（简历类→简历；困难→应用；其余→基础）。"""
     questions = load_questions()
     kw = q.strip().lower()
     out = []
     for item in questions:
+        if favorite and not item.get("favorite"):
+            continue
         if category and item.get("category") != category:
             continue
         if difficulty and item.get("difficulty") != difficulty:
@@ -56,12 +58,24 @@ def update_question(question_id: str, payload: QuestionIn):
         if item["id"] == question_id:
             updated = payload.model_dump()
             updated["scoring_mode"] = updated.get("scoring_mode") or default_scoring_mode(updated["category"])
+            updated["favorite"] = item.get("favorite", False)
             updated["id"] = question_id
             updated["created_at"] = item.get("created_at")
             updated["updated_at"] = now_iso()
             questions[i] = updated
             save_questions(questions)
             return updated
+    raise HTTPException(404, "题目不存在")
+
+
+@router.put("/{question_id}/favorite")
+def set_favorite(question_id: str, favorite: bool):
+    questions = load_questions()
+    for question in questions:
+        if question["id"] == question_id:
+            question["favorite"] = favorite
+            save_questions(questions)
+            return question
     raise HTTPException(404, "题目不存在")
 
 

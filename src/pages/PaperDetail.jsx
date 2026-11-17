@@ -5,24 +5,28 @@ import { Empty, Modal, navigate } from '../ui.jsx'
 const SECTION_BADGE = { 基础: 'blue', 应用: 'purple', 简历: 'gray' }
 const DIFF_BADGE = { 简单: 'green', 中等: 'orange', 困难: 'red' }
 
-function AddQuestionModal({ section, onAdd, onClose }) {
+export function AddQuestionModal({ section, existingIds, onAdd, onClose, saving }) {
   const [questions, setQuestions] = useState(null)
   const [filters, setFilters] = useState({ q: '', difficulty: '' })
 
   useEffect(() => {
-    const params = new URLSearchParams({ section })
+    const params = new URLSearchParams()
+    let current = true
+    if (filters.favorite) params.set('favorite', 'true')
     if (filters.q) params.set('q', filters.q)
     if (filters.difficulty) params.set('difficulty', filters.difficulty)
     api.get('/api/questions?' + params.toString())
-      .then((d) => setQuestions(d.questions))
+      .then((d) => current && setQuestions(d.questions.filter(q => q.category !== '算法笔试')))
       .catch((e) => setQuestions({ error: e.message }))
-  }, [section, filters])
+    return () => { current = false }
+  }, [filters])
 
   return (
-    <Modal title={`从题库添加${section}部分题目`} onClose={onClose}>
+    <Modal title={`从题库添加${section ? section + '部分' : ''}题目`} onClose={onClose}>
       <div className="row mb">
         <input className="input grow" placeholder="搜索题干…" value={filters.q}
           onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+        <label><input type="checkbox" checked={!!filters.favorite} onChange={(e) => setFilters({ ...filters, favorite: e.target.checked })} /> 仅看收藏</label>
         <select className="select" value={filters.difficulty} onChange={(e) => setFilters({ ...filters, difficulty: e.target.value })}>
           <option value="">全部难度</option>
           {DIFFICULTIES.map((d) => <option key={d}>{d}</option>)}
@@ -34,7 +38,7 @@ function AddQuestionModal({ section, onAdd, onClose }) {
         ) : questions.error ? (
           <div className="alert error">{questions.error}</div>
         ) : questions.length === 0 ? (
-          <Empty text={`题库中没有${section}部分的题目`} />
+          <Empty text="没有符合条件的题目" />
         ) : (
           <table className="table">
             <tbody>
@@ -44,7 +48,7 @@ function AddQuestionModal({ section, onAdd, onClose }) {
                   <td><span className="tag">{q.category}</span></td>
                   <td><span className={'badge ' + (DIFF_BADGE[q.difficulty] || 'gray')}>{q.difficulty}</span></td>
                   <td className="right">
-                    <button className="btn sm" onClick={() => onAdd(q)}>添加</button>
+                    <button className="btn sm" disabled={saving || existingIds.includes(q.id)} onClick={() => onAdd(q)}>{existingIds.includes(q.id) ? '已添加' : '添加'}</button>
                   </td>
                 </tr>
               ))}
@@ -95,7 +99,6 @@ export default function PaperDetail({ paperId }) {
   const addQuestion = async (section, q) => {
     const sec = paper.sections.find((s) => s.section === section)
     await persistSections({ [section]: [...sec.question_ids, q.id] })
-    setAddFor(null)
   }
 
   const missing = paper.resolved?.missing_ids?.length
@@ -112,17 +115,18 @@ export default function PaperDetail({ paperId }) {
           </p>
         </div>
         <div className="row">
+          {paper.kind === 'manual' && <button className="btn" onClick={() => navigate('/questions?paper=' + paper.id)}>去题库选题</button>}
           <span className={'badge ' + (paper.kind === 'resume' ? 'purple' : 'blue')} style={{ alignSelf: 'center' }}>
-            {paper.kind === 'resume' ? '简历卷' : '随机卷'}
+            {paper.kind === 'manual' ? '自建卷' : paper.kind === 'resume' ? '简历卷' : '随机卷'}
           </span>
           <button
             className="btn secondary"
-            title="无电脑/麦克风时，打印此表线下手写评分"
+            title="无电脑/麦克风时，打印此表线下记录回答"
             onClick={() =>
-              downloadFile(`/api/papers/${paper.id}/export_sheet`, `线下评分表_${paper.title}.pdf`)
+              downloadFile(`/api/papers/${paper.id}/export_sheet`, `线下面试记录表_${paper.title}.pdf`)
                 .catch((e) => setError(e.message))}
           >
-            🖨 线下评分表
+            🖨 线下面试记录表
           </button>
           <button className="btn success" onClick={() => navigate('/interview/new?paper=' + paper.id)}>
             🎤 开始面试
@@ -146,7 +150,7 @@ export default function PaperDetail({ paperId }) {
             <div className="row between mb">
               <div className="row">
                 <span className={'badge ' + SECTION_BADGE[section]}>{section}部分</span>
-                <span className="muted">{sec.question_ids.length} 题</span>
+                <span className="muted">{questions.length} 题</span>
                 {sec.llm_gen_count > 0 && (
                   <span className="badge purple">面试时按简历生成 {sec.llm_gen_count} 题</span>
                 )}
@@ -162,7 +166,7 @@ export default function PaperDetail({ paperId }) {
                     <tr key={q.id || 'emb-' + i}>
                       <td style={{ width: 30 }} className="muted">{i + 1}</td>
                       <td>
-                        {q.embedded && <span className="badge purple" style={{ marginRight: 6 }}>按简历生成</span>}
+                        {q.embedded && <span className="badge purple" style={{ marginRight: 6 }}>{q.bank_question_id ? `简历匹配 · ${q.technology}` : '按简历生成'}</span>}
                         {q.stem}
                       </td>
                       <td><span className="tag">{q.category}</span></td>
@@ -183,6 +187,8 @@ export default function PaperDetail({ paperId }) {
 
       {addFor && (
         <AddQuestionModal
+          saving={saving}
+          existingIds={paper.sections.flatMap((s) => s.question_ids)}
           section={addFor}
           onAdd={(q) => addQuestion(addFor, q)}
           onClose={() => setAddFor(null)}

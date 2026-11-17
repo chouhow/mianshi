@@ -4,10 +4,10 @@ import { Empty, Link, fmtTime } from '../ui.jsx'
 
 const STATUS = {
   ongoing: { text: '进行中', badge: 'blue' },
-  finished: { text: '待评分', badge: 'orange' },
-  scoring: { text: '评分中', badge: 'orange' },
+  finished: { text: '已完成', badge: 'green' },
+  scoring: { text: '已完成', badge: 'green' },
   scored: { text: '已完成', badge: 'green' },
-  score_error: { text: '评分失败', badge: 'red' },
+  score_error: { text: '已完成', badge: 'green' },
 }
 
 export default function Records() {
@@ -35,7 +35,7 @@ export default function Records() {
   return (
     <div>
       <h1 className="page-title">面试记录</h1>
-      <p className="page-sub">历史面试与评分报告</p>
+      <p className="page-sub">历史面试与面试报告</p>
       {error && <div className="alert error">{error}</div>}
 
       <div className="card" style={{ padding: 0 }}>
@@ -47,7 +47,7 @@ export default function Records() {
           <table className="table">
             <thead>
               <tr>
-                <th>候选人</th><th>试卷</th><th>状态</th><th>已答/不会/未问</th><th>总分</th><th>面试时间</th><th className="right">操作</th>
+                <th>候选人</th><th>试卷</th><th>状态</th><th>已答/不会/未问</th><th>面试时间</th><th className="right">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -59,7 +59,6 @@ export default function Records() {
                     <td>{r.paper_title}</td>
                     <td><span className={'badge ' + st.badge}>{st.text}</span></td>
                     <td className="muted">{r.answered} / {r.unknown} / {r.total_items - r.answered - r.unknown}</td>
-                    <td>{r.total != null ? <b>{r.total}</b> : '—'}</td>
                     <td className="muted">{fmtTime(r.created_at)}</td>
                     <td className="right">
                       {r.status === 'ongoing' ? (

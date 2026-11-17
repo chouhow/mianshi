@@ -70,7 +70,7 @@ def test_paper_generation_insufficient_warning():
     assert any("少于" in w for w in paper["warnings"])
 
 
-def test_full_interview_flow_with_mock_scoring():
+def test_full_interview_flow_with_favorite_append():
     client = make_client()
     save_config({"llm_mock": True, "judge_mode": "per_question"})
 
@@ -125,39 +125,36 @@ def test_full_interview_flow_with_mock_scoring():
                    json={"answer_text": "", "state": "answered"})
     assert r.status_code == 400
 
+    extra = _mk_question(client, "临时追加", difficulty="困难")
+    favorite_url = f"/api/questions/{extra['id']}/favorite"
+    assert client.put(favorite_url, params={"favorite": True}).json()["favorite"]
+    favorites = client.get("/api/questions?favorite=true&difficulty=困难").json()["questions"]
+    assert [q["id"] for q in favorites] == [extra["id"]]
+    append_url = f"/api/interviews/{iv['id']}/items/{extra['id']}"
+    assert client.post(append_url).json()["items"][-1]["stem"] == extra["stem"]
+    assert len(client.post(append_url).json()["items"]) == len(items) + 1
+    assert not client.put(favorite_url, params={"favorite": False}).json()["favorite"]
+
     # 结束面试：剩余 pending → unasked
     iv = client.post(f"/api/interviews/{iv['id']}/finish").json()
     assert all(it["state"] != "pending" for it in iv["items"])
     unasked_count = sum(1 for it in iv["items"] if it["state"] == "unasked")
-    assert unasked_count == 16 - 12
+    assert unasked_count == 17 - 12
 
-    # 评分（mock），轮询直至完成
-    assert client.post(f"/api/interviews/{iv['id']}/score").status_code == 200
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        iv = client.get(f"/api/interviews/{iv['id']}").json()
-        if iv["status"] in ("scored", "score_error"):
-            break
-        time.sleep(0.2)
-    assert iv["status"] == "scored", iv.get("score_error")
-
-    s = iv["scores"]
-    assert s["applied"] <= 30 and s["resume"] <= 30 and s["total"] <= 100
-    # 基础 10 题计分（6答4未问→6计分），均分按mock长度规则；只验证边界
-    assert 0 <= s["basic"] <= 40
-    assert iv["resume_comment"]
-
-    # 不会的题 0 分且不调 LLM
-    unknown = [it for it in iv["items"] if it["state"] == "unknown"]
-    assert all(it["score"] == 0.0 for it in unknown)
+    assert client.post(append_url).status_code == 400
+    assert client.post(f"/api/interviews/{iv['id']}/score").status_code == 404
 
     # 导出
     exp = client.get(f"/api/interviews/{iv['id']}/export").json()
     assert "面试报告" in exp["markdown"] and "张三" in exp["markdown"]
 
+    assert "难度：困难" in exp["markdown"] and "类型：Python" in exp["markdown"]
+    assert "总分" not in exp["markdown"]
+    assert client.get(f"/api/interviews/{iv['id']}/export_pdf").content.startswith(b"%PDF")
+
     # 记录列表
     rows = client.get("/api/interviews").json()["interviews"]
-    assert any(x["id"] == iv["id"] and x["status"] == "scored" for x in rows)
+    assert any(x["id"] == iv["id"] and x["status"] == "finished" for x in rows)
 
 
 def test_resume_paper_and_multi_paper_interview():
@@ -224,3 +221,51 @@ def test_resume_paper_and_multi_paper_interview():
     # 未选试卷报 422
     r = client.post("/api/interviews", json={"candidate_name": "无卷", "resume_text": ""})
     assert r.status_code == 422
+
+
+def test_manual_paper_starts_empty_and_accepts_bank_questions():
+    client = make_client()
+    paper = client.post("/api/papers", json={"title": "自选 Python"}).json()
+    assert paper["kind"] == "manual"
+    assert all(not sec["question_ids"] for sec in paper["sections"])
+    question = _mk_question(client, "数据库事务", difficulty="困难")
+    url = f"/api/papers/{paper['id']}/questions/{question['id']}"
+    assert client.put(url).status_code == 200
+    assert client.put(url).status_code == 200
+    saved = client.get("/api/papers/" + paper["id"]).json()
+    applied = next(s for s in saved["resolved"]["sections"] if s["section"] == "应用")
+    assert applied["question_ids"] == [question["id"]]
+    interview = client.post("/api/interviews", json={"paper_id": paper["id"], "candidate_name": "张三"}).json()
+    assert [item["question_id"] for item in interview["items"]] == [question["id"]]
+
+
+def test_resume_matching_and_report_categories():
+    from routers.papers import _create_resume_paper
+    from services.resume_questions import sample_questions
+
+    client = make_client()
+    save_config({"llm_mock": True})
+    text = "项目使用 FastAPI、Docker 和 PostgreSQL，源码托管在 GitHub。"
+    bank = [_mk_question(client, category, category=category)
+            for category in ("FastAPI", "Docker", "PostgreSQL", "Git")]
+    large_pool = [dict(bank[0], id=str(i), stem=f"接口题 {i}") for i in range(8)]
+    assert len({q["stem"] for q in sample_questions(text, large_pool)}) == 6
+    sampled = sample_questions(text, bank)
+    assert {q["technology"] for q in sampled} == {"FastAPI", "Docker", "PostgreSQL"}
+    assert not sample_questions("熟悉 GitHub 和 storage", bank)
+    base = _mk_question(client, "常规问题", category="测试基础")
+    paper = client.post("/api/papers/generate", json={
+        "sections": [{"section": "基础", "count": 1, "categories": [base["category"]]}]
+    }).json()
+    request = {"paper_ids": [paper["id"]], "candidate_name": "测试", "resume_text": text}
+    interview = client.post("/api/interviews", json=request).json()
+    resume_items = [i for i in interview["items"] if i["section"] == "简历"]
+    assert len(resume_items) == 6
+    assert all(i["category"] == "简历" for i in resume_items)
+    report = client.get(f"/api/interviews/{interview['id']}/export").json()["markdown"]
+    assert report.count("类型：简历") == 6 and "类型：测试基础" in report
+    saved = _create_resume_paper("简历卷", [{"stem": "项目职责？", "reference_answer": "描述本人工作"}], text)
+    request["paper_ids"].append(saved["id"])
+    combined = client.post("/api/interviews", json=request).json()
+    assert len(combined["items"]) == 5
+    assert all(i["category"] == "简历" for i in combined["items"] if i["section"] == "简历")

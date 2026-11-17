@@ -34,7 +34,7 @@ export default function InterviewSetup({ paperId }) {
       return
     }
     if (selected.length === 0) {
-      setError('请至少勾选一份试卷（随机卷 + 简历卷可同时勾选）')
+      setError('请至少勾选一份试卷')
       return
     }
     setBusy(true)
@@ -76,7 +76,7 @@ export default function InterviewSetup({ paperId }) {
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
       <h1 className="page-title">开始面试</h1>
       <p className="page-sub">
-        勾选本次面试使用的试卷（随机卷 + 简历卷可组合），结束后报告按 基础 / 应用 / 简历 自动汇总
+        勾选本次面试使用的试卷，可同时选择多份
       </p>
       {error && <div className="alert error">{error}</div>}
 
@@ -86,6 +86,9 @@ export default function InterviewSetup({ paperId }) {
           <div className="empty">加载中…</div>
         ) : (
           <div className="col">
+            {group('manual').length > 0 && (
+              <><div className="muted small">自建卷（手动选题）</div>{group('manual').map(renderRow)}</>
+            )}
             {group('bank').length > 0 && (
               <>
                 <div className="muted small">🎲 随机卷（基础 + 应用，题库抽题）</div>
@@ -100,7 +103,7 @@ export default function InterviewSetup({ paperId }) {
             )}
             {papers.length === 0 && (
               <div className="empty">
-                还没有试卷，先到「试卷管理」随机组卷或按简历生成
+                还没有试卷，先到「试卷管理」创建试卷
                 <div style={{ marginTop: 8 }}>
                   <button className="btn sm secondary" onClick={() => navigate('/papers')}>前往试卷管理</button>
                 </div>
@@ -141,7 +144,7 @@ export default function InterviewSetup({ paperId }) {
             onChange={(e) => setCandidateName(e.target.value)} placeholder="如：李四" />
         </div>
         <div className="field">
-          <label>候选人简历（用于简历熟悉度评价；PDF 解析后自动填入，也可直接粘贴文本）</label>
+          <label>候选人简历（可粘贴文本。开始时按简历技术最多抽 6 道题（不足 6 道按实际数量），再由 AI 生成项目题；已选同一简历生成的新卷时直接使用卷内题目）</label>
           <textarea className="textarea" rows={8} value={resumeText}
             onChange={(e) => setResumeText(e.target.value)}
             placeholder={'粘贴简历全文或要点，例如：\nxx大学 计算机专业\nA公司 Python后端 2年：负责订单系统，FastAPI + MySQL，做过慢查询优化…'} />
@@ -151,7 +154,7 @@ export default function InterviewSetup({ paperId }) {
       <div className="row">
         <button className="btn secondary" onClick={() => navigate('/papers')}>返回</button>
         <button className="btn success" onClick={start} disabled={busy || selected.length === 0}>
-          {busy ? '创建中…' : '🎤 进入面试'}
+          {busy ? '正在准备面试题…' : '🎤 进入面试'}
         </button>
       </div>
     </div>

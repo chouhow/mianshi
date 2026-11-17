@@ -1,3 +1,4 @@
+import { AddQuestionModal } from './PaperDetail.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, FREQ_BADGE, SECTIONS, STATE_BADGE, STATE_TEXT } from '../api.js'
 import { navigate, Markdown } from '../ui.jsx'
@@ -15,6 +16,18 @@ export default function InterviewRun({ interviewId }) {
   const [asrError, setAsrError] = useState('')
   const [error, setError] = useState('')
   const [showRef, setShowRef] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [savingQuestion, setSavingQuestion] = useState(false)
+  const appendQuestion = async (q) => {
+    setSavingQuestion(true)
+    try {
+      setInterview(await api.post(`/api/interviews/${interviewId}/items/${q.id}`))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingQuestion(false)
+    }
+  }
   const recorderRef = useRef(null)
   const liveBoxRef = useRef(null)
 
@@ -116,7 +129,7 @@ export default function InterviewRun({ interviewId }) {
           state: 'answered',
         })
       } else {
-        if (!window.confirm('确定标记为「不会」？该题将计 0 分。')) return
+        if (!window.confirm('确定标记为「不会」？')) return
         await api.put(`/api/interviews/${interview.id}/items/${active.id}`, { state: 'unknown' })
       }
       setError('')
@@ -143,8 +156,8 @@ export default function InterviewRun({ interviewId }) {
     if (recording) await stopRecord()
     const unasked = interview.items.filter((it) => it.state === 'pending').length
     const msg = unasked > 0
-      ? `还有 ${unasked} 道题未问，结束面试后这些题不计入评分。确定结束？`
-      : '确定结束面试并进入评分？'
+      ? `还有 ${unasked} 道题未问，确定结束？`
+      : '确定结束面试并查看报告？'
     if (!window.confirm(msg)) return
     try {
       await api.post(`/api/interviews/${interview.id}/finish`)
@@ -163,6 +176,9 @@ export default function InterviewRun({ interviewId }) {
             试卷：{interview.paper_title} · 已答 {stats.answered} / 不会 {stats.unknown} / 未问 {stats.pending}
           </p>
         </div>
+        <button className="btn secondary" disabled={recording} onClick={() => setAdding(true)}>＋ 从题库添加</button>
+        {adding && <AddQuestionModal existingIds={items.map((it) => it.question_id)} saving={savingQuestion}
+          onAdd={appendQuestion} onClose={() => setAdding(false)} />}
         <button className="btn danger" onClick={finish}>🏁 结束面试</button>
       </div>
       {error && <div className="alert error">{error}</div>}
@@ -210,17 +226,11 @@ export default function InterviewRun({ interviewId }) {
 
             <div className="mb">
               <button className="btn sm secondary" onClick={() => setShowRef(!showRef)}>
-                {showRef ? '收起' : '📖 评分标准与参考答案'}
+                {showRef ? '收起' : '📖 参考答案'}
               </button>
             </div>
             {showRef && (
               <div className="ref-answer mb">
-                {active.scoring_points && (
-                  <>
-                    <div className="muted mb"><b>评分标准（采分点）</b></div>
-                    <Markdown text={active.scoring_points} />
-                  </>
-                )}
                 <div className="muted mb mt"><b>参考答案</b></div>
                 <Markdown text={active.reference_answer} />
                 {active.explanation && (
@@ -260,7 +270,7 @@ export default function InterviewRun({ interviewId }) {
             <div className="row">
               <button className="btn success" onClick={() => saveAnswer('answered')}>✔ 保存回答</button>
               <button className="btn danger" onClick={() => saveAnswer('unknown')} disabled={recording}>
-                ✖ 不会（计 0 分）
+                ✖ 不会
               </button>
               {active.state !== 'pending' && (
                 <button className="btn secondary" onClick={resetItem} disabled={recording}>重新作答</button>

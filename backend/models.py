@@ -22,6 +22,13 @@ def derive_section(category: str, difficulty: str) -> str:
     return "应用" if difficulty == "困难" else "基础"
 
 
+WRITTEN_CATEGORY = "算法笔试"
+
+
+class WrittenResultIn(BaseModel):
+    passed: bool
+
+
 class QuestionIn(BaseModel):
     stem: str = Field(min_length=1)
     reference_answer: str = Field(min_length=1)
@@ -86,6 +93,10 @@ class PaperGenerateRequest(BaseModel):
     title: Optional[str] = None
     sections: List[SectionParam]
     frequency_ratio: Optional[FrequencyRatio] = None
+
+
+class ManualPaperRequest(BaseModel):
+    title: str = Field(min_length=1)
 
 
 class PaperUpdateRequest(BaseModel):

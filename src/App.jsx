@@ -20,7 +20,7 @@ function Switch({ route }) {
   const [seg0, seg1, seg2] = route.parts
   switch (seg0) {
     case 'questions':
-      return <Questions />
+      return <Questions key={route.query.paper || ''} paperId={route.query.paper} />
     case 'papers':
       return seg1 ? <PaperDetail paperId={seg1} /> : <Papers />
     case 'records':

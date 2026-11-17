@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, DIFFICULTIES, FREQ_BADGE, FREQUENCIES } from '../api.js'
-import { Empty, Modal, fmtTime } from '../ui.jsx'
+import { Empty, Modal, Link, navigate, fmtTime } from '../ui.jsx'
 
 const EMPTY_FORM = {
   stem: '',
@@ -66,12 +66,8 @@ function QuestionFormModal({ initial, categories, onSave, onClose }) {
         </div>
         <div className="field">
           <label>参考答案 *</label>
-          <textarea className="textarea" rows={4} value={form.reference_answer} onChange={set('reference_answer')} placeholder="评分依据，尽量写清要点" />
+          <textarea className="textarea" rows={4} value={form.reference_answer} onChange={set('reference_answer')} placeholder="请写清回答要点" />
           {errors.reference_answer && <span className="err">{errors.reference_answer}</span>}
-        </div>
-        <div className="field">
-          <label>评分标准 / 采分点（推荐填写，评分将严格按点给分）</label>
-          <textarea className="textarea" rows={3} value={form.scoring_points} onChange={set('scoring_points')} placeholder={'每行一个采分点及分值，合计 5 分。例如：\n答出列表可变、元组不可变：2分\n答出元组可哈希、可作字典键：1.5分\n答出元组内存更小：1.5分\n\n留空时 LLM 会按参考答案自动归纳采分点'} />
         </div>
         <div className="field">
           <label>题目讲解（可选，支持 Markdown：列表 / 代码 / 表格）</label>
@@ -98,13 +94,6 @@ function QuestionFormModal({ initial, categories, onSave, onClose }) {
               {FREQUENCIES.map((f) => <option key={f}>{f}</option>)}
             </select>
           </div>
-          <div className="field span2">
-            <label>评分方式 *</label>
-            <select className="select" value={form.scoring_mode} onChange={set('scoring_mode')}>
-              <option value="points">按点给分（答案确定，严格按采分点）</option>
-              <option value="holistic">综合评价（开放型题目，整体质量判断）</option>
-            </select>
-          </div>
           <div className="field">
             <label></label>
             <span className="muted" style={{ marginTop: 18, display: 'inline-block' }}>所属部分按难度自动归属：简单/中等→基础，困难→应用</span>
@@ -119,7 +108,27 @@ function QuestionFormModal({ initial, categories, onSave, onClose }) {
   )
 }
 
-export default function Questions() {
+export default function Questions({ paperId }) {
+  const [manualPapers, setManualPapers] = useState([])
+  const [paper, setPaper] = useState(null)
+  const [adding, setAdding] = useState(false)
+  useEffect(() => {
+    api.get('/api/papers').then((data) => setManualPapers(data.papers.filter((p) => p.kind === 'manual')))
+      .catch((e) => setError(e.message))
+    if (paperId) api.get('/api/papers/' + paperId).then(setPaper).catch((e) => setError(e.message))
+  }, [paperId])
+  const selectedIds = new Set(paper?.sections.flatMap((section) => section.question_ids))
+  const addQuestion = async (qid) => {
+    setAdding(true)
+    try {
+      setPaper(await api.put(`/api/papers/${paperId}/questions/${qid}`))
+      setError('')
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setAdding(false)
+    }
+  }
   const [questions, setQuestions] = useState(null)
   const [categories, setCategories] = useState([])
   const [filters, setFilters] = useState({ q: '', category: '', difficulty: '', frequency: '' })
@@ -172,6 +181,15 @@ export default function Questions() {
         共 {(questions || []).length} 道题 · 高频 {stats['高频']} / 中频 {stats['中频']} / 低频 {stats['低频']}
       </p>
 
+      {manualPapers.length > 0 && <div className="card row">
+        <label htmlFor="target-paper">加入自建试卷</label>
+        <select id="target-paper" className="select" value={paperId || ''} onChange={(e) =>
+          navigate(e.target.value ? '/questions?paper=' + e.target.value : '/questions')}>
+          <option value="">选择试卷</option>
+          {manualPapers.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+        </select>
+        {paper && <Link className="btn secondary" to={'/papers/' + paper.id}>查看试卷（{selectedIds.size} 题）</Link>}
+      </div>}
       {error && <div className="alert error">{error}</div>}
 
       <div className="card">
@@ -194,6 +212,7 @@ export default function Questions() {
             <option value="">全部频率</option>
             {FREQUENCIES.map((f) => <option key={f}>{f}</option>)}
           </select>
+          <label><input type="checkbox" checked={!!filters.favorite} onChange={(e) => setFilters({ ...filters, favorite: e.target.checked })} /> 仅看收藏</label>
           <div className="grow" />
           <button className="btn" onClick={() => setEditing({})}>＋ 新建题目</button>
         </div>
@@ -203,7 +222,7 @@ export default function Questions() {
         {questions === null ? (
           <Empty text="加载中…" />
         ) : questions.length === 0 ? (
-          <Empty text="题库为空，点击右上角「新建题目」开始添加" />
+          <Empty text="没有符合条件的题目" />
         ) : (
           <table className="table">
             <thead>
@@ -227,6 +246,14 @@ export default function Questions() {
                   <td>{q.explanation ? '✅' : '—'}</td>
                   <td className="muted">{fmtTime(q.updated_at)}</td>
                   <td className="right">
+                    {paper && <button className="btn sm" disabled={adding || selectedIds.has(q.id)}
+                      onClick={() => addQuestion(q.id)}>{selectedIds.has(q.id) ? '已加入' : '加入试卷'}</button>}{' '}
+                    <button className="btn sm secondary" aria-pressed={!!q.favorite} onClick={async () => {
+                      try {
+                        await api.put(`/api/questions/${q.id}/favorite?favorite=${!q.favorite}`)
+                        await load()
+                      } catch (e) { setError(e.message) }
+                    }}>{q.favorite ? '★ 已收藏' : '☆ 收藏'}</button>{' '}
                     <button className="btn sm secondary" onClick={() => setEditing(q)}>编辑</button>{' '}
                     <button className="btn sm ghost-danger" onClick={() => remove(q)}>删除</button>
                   </td>

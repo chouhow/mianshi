@@ -10,6 +10,9 @@ const HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`
 
 let pythonProcess = null
 let mainWindow = null
+let stopping = false
+let retryTimer = null
+let retryDelay = 500
 
 // Python 命令优先级：data/config.json 的 python_cmd > 项目内 .venv > 系统 python
 function getPythonCmd() {
@@ -35,48 +38,58 @@ function startBackend() {
   })
   pythonProcess.stdout.on('data', (d) => process.stdout.write(`[py] ${d}`))
   pythonProcess.stderr.on('data', (d) => process.stderr.write(`[py] ${d}`))
-  pythonProcess.on('exit', (code) => {
-    console.log(`[electron] python 后端退出 code=${code}`)
+  pythonProcess.on('error', (error) => console.error('[electron] 后端启动失败', error.message))
+  pythonProcess.once('close', () => {
     pythonProcess = null
+    if (!stopping) {
+      retryTimer = setTimeout(ensureBackend, retryDelay)
+      retryDelay = Math.min(retryDelay * 2, 8000)
+    }
   })
 }
 
 function stopBackend() {
-  if (!pythonProcess) return
-  const pid = pythonProcess.pid
+  stopping = true
+  clearTimeout(retryTimer)
+  const child = pythonProcess
+  if (!child?.pid) return
   pythonProcess = null
   if (process.platform === 'win32') {
-    // Windows 下杀掉整棵进程树，避免 uvicorn 子进程残留
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
   } else {
-    try {
-      pythonProcess.kill('SIGTERM')
-    } catch (_e) {
-      /* ignore */
-    }
+    child.kill('SIGTERM')
   }
 }
 
-function waitForBackend(retries = 60, interval = 500) {
-  return new Promise((resolve, reject) => {
-    const tryOnce = (left) => {
-      const req = http.get(HEALTH_URL, (res) => {
-        res.resume()
-        if (res.statusCode === 200) resolve()
-        else retry(left)
+function backendHealthy() {
+  return new Promise((resolve) => {
+    const req = http.get(HEALTH_URL, (res) => {
+      let body = ''
+      res.on('data', chunk => { body += chunk })
+      res.on('error', () => resolve(false))
+      res.on('end', () => {
+        try {
+          resolve(res.statusCode === 200 && JSON.parse(body).service === 'mianshi-backend')
+        } catch {
+          resolve(false)
+        }
       })
-      req.on('error', () => retry(left))
-      req.setTimeout(2000, () => {
-        req.destroy()
-        retry(left)
-      })
-    }
-    const retry = (left) => {
-      if (left <= 0) return reject(new Error('后端启动超时'))
-      setTimeout(() => tryOnce(left - 1), interval)
-    }
-    tryOnce(retries)
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(1500, () => req.destroy())
   })
+}
+
+async function ensureBackend() {
+  const healthy = await backendHealthy()
+  if (stopping) return
+  if (healthy) {
+    retryDelay = 500
+    // Also supervise availability when another launcher owns the service.
+    retryTimer = setTimeout(ensureBackend, 3000)
+  } else if (!pythonProcess) {
+    startBackend()
+  }
 }
 
 function createWindow() {
@@ -105,12 +118,12 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  startBackend()
-  try {
-    await waitForBackend()
-  } catch (e) {
-    console.error(`[electron] ${e.message}，请检查 python 命令与依赖安装`)
+  await ensureBackend()
+  for (let i = 0; i < 20 && !stopping; i++) {
+    if (await backendHealthy()) break
+    await new Promise(resolve => setTimeout(resolve, 250))
   }
+  if (stopping) return
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -6,8 +6,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from models import (GenerateFromResumeRequest, PaperGenerateRequest,
-                     PaperUpdateRequest, derive_section)
+from models import (GenerateFromResumeRequest, ManualPaperRequest, PaperGenerateRequest,
+                     PaperUpdateRequest, WRITTEN_CATEGORY, derive_section)
+from services.resume_questions import resume_key, sample_questions
 from services import llm
 from storage import delete_paper, list_papers, load_paper, load_questions, new_id, now_iso, save_paper
 
@@ -115,7 +116,8 @@ def _resolve_questions(paper: dict) -> dict:
         items = []
         for qid in sec.get("question_ids", []):
             if qid in questions:
-                items.append(questions[qid])
+                if questions[qid].get("category") != WRITTEN_CATEGORY:
+                    items.append(questions[qid])
             else:
                 missing.append(qid)
         for emb in sec.get("embedded_questions", []):
@@ -144,10 +146,42 @@ def get_papers():
     return {"papers": out}
 
 
+@router.post("")
+def create_manual_paper(payload: ManualPaperRequest):
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(422, "请输入试卷名称")
+    paper = {
+        "id": new_id("paper"), "kind": "manual", "title": title, "created_at": now_iso(),
+        "sections": [{"section": section, "question_ids": [], "llm_gen_count": 0}
+                     for section in ("基础", "应用", "简历")],
+    }
+    save_paper(paper)
+    return paper
+
+
+@router.put("/{paper_id}/questions/{question_id}")
+async def add_bank_question(paper_id: str, question_id: str):
+    paper = load_paper(paper_id)
+    if not paper:
+        raise HTTPException(404, "试卷不存在")
+    if paper.get("kind") != "manual":
+        raise HTTPException(400, "请选择自建试卷")
+    question = next((q for q in load_questions() if q["id"] == question_id), None)
+    if not question:
+        raise HTTPException(404, "题目不存在")
+    if not any(question_id in sec["question_ids"] for sec in paper["sections"]):
+        section = derive_section(question["category"], question["difficulty"])
+        target = next(sec for sec in paper["sections"] if sec["section"] == section)
+        target["question_ids"].append(question_id)
+        save_paper(paper)
+    return paper
+
+
 @router.post("/generate")
 def generate_paper(payload: PaperGenerateRequest):
     """根据参数从题库随机抽题组卷：每部分可设难度多选+难度比例，并按频率比例抽题。"""
-    bank = load_questions()
+    bank = [q for q in load_questions() if q.get("category") != WRITTEN_CATEGORY]
     ratio = (payload.frequency_ratio.model_dump() if payload.frequency_ratio
              else {"高频": 7, "中频": 2, "低频": 1})
     warnings = []
@@ -197,7 +231,7 @@ def generate_paper(payload: PaperGenerateRequest):
     return paper
 
 
-def _create_resume_paper(title, questions: list) -> dict:
+def _create_resume_paper(title, questions: list, resume_text: str) -> dict:
     """创建独立简历试卷：仅含按简历生成的内嵌简历题（kind=resume，不基于其他试卷）。"""
     from storage import new_id as _new_id, now_iso as _now
 
@@ -207,13 +241,15 @@ def _create_resume_paper(title, questions: list) -> dict:
         item["category"] = "简历"  # 简历题固定归简历部分
         embedded.append(item)
 
+    sampled = sample_questions(resume_text, load_questions(), (q["stem"] for q in embedded))
     paper = {
+        "resume_key": resume_key(resume_text),
         "id": _new_id("paper"),
         "title": (title or "").strip() or f"简历卷 {_now()[:16].replace('T', ' ')}",
         "kind": "resume",
         "created_at": _now(),
         "sections": [
-            {"section": "简历", "question_ids": [], "embedded_questions": embedded, "llm_gen_count": 0}
+            {"section": "简历", "question_ids": [], "embedded_questions": sampled + embedded, "llm_gen_count": 0}
         ],
         "warnings": [],
     }
@@ -233,7 +269,7 @@ async def _run_resume_generation(task_id: str, payload: GenerateFromResumeReques
         questions = await llm.generate_resume_questions(
             payload.resume_text.strip(), payload.max_count, on_chunk=on_chunk
         )
-        paper2 = _create_resume_paper(payload.title, questions)
+        paper2 = _create_resume_paper(payload.title, questions[:payload.max_count], payload.resume_text)
         task.update({"status": "done", "paper_id": paper2["id"], "title": paper2["title"]})
     except Exception as e:  # noqa: BLE001
         task.update({"status": "error", "error": str(e)})
@@ -260,17 +296,17 @@ def get_paper(paper_id: str):
 
 @router.get("/{paper_id}/export_sheet")
 def export_paper_sheet(paper_id: str):
-    """导出线下评分表 PDF：题目列表 + 空白得分/评语栏（无电脑、无麦克风时面试官手写评分）。"""
+    """导出线下面试记录表 PDF：题目列表 + 空白得分/评语栏（无电脑、无麦克风时面试官手写评分）。"""
     paper = load_paper(paper_id)
     if not paper:
         raise HTTPException(404, "试卷不存在")
-    from services.pdf_report import build_scoring_sheet_pdf
+    from services.pdf_report import build_interview_sheet_pdf
 
     try:
-        data = build_scoring_sheet_pdf({**paper, "resolved": _resolve_questions(paper)})
+        data = build_interview_sheet_pdf({**paper, "resolved": _resolve_questions(paper)})
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"PDF 生成失败: {e}")
-    filename = f"线下评分表_{paper['title']}_{paper_id}.pdf"
+    filename = f"线下面试记录表_{paper['title']}_{paper_id}.pdf"
     headers = {
         "Content-Disposition": f"attachment; filename=sheet.pdf; filename*=UTF-8''{quote(filename)}"
     }
@@ -298,6 +334,8 @@ def update_paper(paper_id: str, payload: PaperUpdateRequest):
             for qid in ids:
                 if qid not in questions:
                     raise HTTPException(400, f"题目 {qid} 不存在")
+                if questions[qid].get("category") == WRITTEN_CATEGORY:
+                    raise HTTPException(400, "算法笔试题仅用于登记机测结果")
                 clean.append(qid)
             new_sections.append({**sec, "question_ids": clean})
         paper["sections"] = new_sections

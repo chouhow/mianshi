@@ -281,7 +281,7 @@ explanation 字段是写给面试官看的题目说明（面试官未必熟悉�
 【期望回答】合格回答应出现的要点（具体数字、决策过程、细节取舍）；
 【警惕信号】什么样的表现说明候选人可能没做过（含糊带过、说不出细节、数字前后矛盾）。
 
-只输出 JSON，格式：{"questions": [{"stem": "题干", "reference_answer": "参考答案要点", "scoring_points": "评分标准，每行一个采分点及分值，合计5分，如：答出项目背景与职责：2分", "explanation": "为什么问：…；期望回答：…；警惕信号：…", "difficulty": "简单|中等|困难"}]}"""
+只输出 JSON，格式：{"questions": [{"stem": "题干", "reference_answer": "参考答案要点", "explanation": "为什么问：…；期望回答：…；警惕信号：…", "difficulty": "简单|中等|困难"}]}"""
 
 
 async def generate_resume_questions(resume_text: str, max_count: int = 10, on_chunk=None) -> list:

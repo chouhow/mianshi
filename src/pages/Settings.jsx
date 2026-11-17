@@ -152,21 +152,13 @@ export default function Settings() {
       </div>
 
       <div className="card">
-        <div className="card-title">评分与其他</div>
+        <div className="card-title">其他设置</div>
         <div className="form-grid">
-          <div className="field">
-            <label>评分模式</label>
-            <select className="select" value={cfg.judge_mode} onChange={(e) => setCfg({ ...cfg, judge_mode: e.target.value })}>
-              <option value="per_question">逐题评判（默认，进度可见、可中断恢复）</option>
-              <option value="whole_paper">整卷评判（一次提交全部问答）</option>
-            </select>
-            <span className="muted">两种模式的准确性可比对测试后自行选择</span>
-          </div>
           <div className="field">
             <label>Mock 模式（无密钥联调）</label>
             <label className="row" style={{ gap: 6 }}>
               <input type="checkbox" checked={cfg.llm_mock} onChange={(e) => setCfg({ ...cfg, llm_mock: e.target.checked })} />
-              <span className="small">LLM 调用返回模拟评分（按回答长度），不请求方舟</span>
+              <span className="small">LLM 调用返回模拟结果，不请求方舟</span>
             </label>
           </div>
           <div className="field">
